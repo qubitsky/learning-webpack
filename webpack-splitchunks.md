@@ -130,9 +130,62 @@ function App() {
 
 然后执行 `npm run build` 构建，这次会多出两个异步 chunks，对应 A，B 这两个页面。
 
-当从 A 页面跳转到 B 页面后，会发现 B 页面的，Foo 的组件样式载入了两遍，如下图：
+当从 A 页面跳转到 B 页面后，会发现 B 页面的，Foo 的组件样式载入了两遍，结果如下图：
 
 ![page b](page-b.png)
+
+检查发现，A、B页面对应的两个 chunks 文件内，都有 Foo 组件的内容，build/static/css 目录下也有两个内容一样的 css 文件。
+
+## 解决问题
+
+我们回过头去看 splitChunks 的默认配置，cacheGroups 下，还有这样一个提取策略
+
+```js
+default: {
+  minChunks: 2,
+  priority: -20,
+  reuseExistingChunk: true
+}
+```
+
+它的意思是，被引用次数超过两次的 js 模块（ `minChunks: 2` ），需要提取到同一个新的 chunk，可实际上并没有输出这样的 chunk。我们再看这一行
+
+```js
+minSize: 30000,
+```
+
+它的意思是，只有模块的文件体积超过 30000 byte，即 30 kb，才有必要提取出去。所以原因就在这了。
+
+于是我们把它修改掉试试，最后 webpack.config.js 中的 splitChunks 配置如下：
+
+```js
+splitChunks: {
+  chunks: 'all',
+  name: false,
+  minSize: 0
+},
+runtimeChunk: {
+  name: entrypoint => `runtime-${entrypoint.name}`,
+},
+```
+
+再执行一遍 `npm run build`，现在我们再去审查 Foo 组件，就不会再有前面重复加载的问题了。
+
+## 最佳实践
+
+现在是不是对定制 splitChunks ，会有一些思路了？但是怎样制定 splitChunks 策略最好，通常是要结合自己碰到的业务需求来确定的，这个就有待大家探索了。
+
+我认为使用 splitChunks 的目的，就是想要
+
+1. 减小包的体积（也是为了服务于第2点）
+2. 减少页面的加载时间（内容相对固定的一些模块放到同一个chunks，就可以充分利用浏览器的缓存功能）
+
+所以通常，我们会进行以下实践
+
+1. 厂商模块（通常是业务依赖的node_modules下的一些作为基础的模块）可提取到一个名为 vendors 的文件中，它们基本不大会需要改动。
+2. 不同业务项目依赖的公共模块（比如组件库，工具库之类这些改动不是很频繁的模块），可提取到一个名为 common 的文件中。
+
+剩下的就交给 webpack 的默认配置去完成就好啦~
 
 ## 相关文章
 
